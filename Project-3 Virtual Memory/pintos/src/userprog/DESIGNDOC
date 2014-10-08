@@ -1,0 +1,362 @@
+		     +--------------------------+
+       	          |   CSE 5600		|
+		     | PROJECT 2: USER PROGRAMS	|
+		     | 	   DESIGN DOCUMENT     	|
+		     +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Avanti Kabra avanti64@ccs.neu.edu
+Sachin Doiphode sachinvd@ccs.neu.edu
+
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+http://linux.die.net/man/3/strtok_r
+  
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+tid_t
+process_execute (const char *file_name) 
+     file_name = strtok_r( fn_copy1, " ", &saveptr);
+     We parsed a string based on the delimiter provided " " to 
+	 separate out the arguments and command.
+
+static void
+start_process (void *file_name_)	 
+	 file_name = strtok_r( file_name, " ", &saveptr);
+	  success = load (file_name, &if_.eip, &if_.esp);
+  
+    //Changes for argument passing
+     if(success)
+    {
+       push_stack(&if_.esp,org_args);
+       t->child->load_status = PRO_LOAD_SUC;
+    } 
+     else
+       t->child->load_status = PRO_LOAD_FAIL;
+	   In this method we parse the arguments using strtok_r to parse
+	   the arguments based on the delimiter and pass the file name 
+	   to the load function. If this method returns true we pass the 
+	   arguments to the push_stack method to push the arguments on the stack
+	   
+static void push_stack(void **esp, char *file_name)
+In this method we get the parsed arguments and push them on the stack
+in reverse order. 
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+    After parsing the filename string for the argument strings, we call
+	push_stack method with the parsed arguments and push those 
+	arguments on the stack in reverse order, then word align the stack
+	pointer, then push on the argv[] values in reverse order, after that 
+	we push argc onto the stack. At last we push a NULL pointer which is 
+	the fake address to build the initial stack frame. 
+	We then push a pointer to the beginning of argv (i.e. argv*[]), then
+	push argc, then push a dummy return address (NULL).
+	The argv[0] is pushed at the lowest virtual address and a null 
+	pointer sentinel is pushed at the end which ensures that the
+	order is maintained.
+	
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+       strtok_r is a thread safe version of strtok. 
+	   The strtok_r() function is a reentrant version strtok().
+	   The saveptr argument is a pointer to a char * variable that is 
+	   used internally by strtok_r() in order to maintain context between
+	   successive calls that parse the same string.
+
+
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+    Separation of arguments and executables helps in input sanitization.
+	The arguments which are passed to the kernel will be checked keeping
+	the kernel implementation simpler. Also using shell for passing 
+	arguments limits the number of arguments being passed to the
+	kernel.
+
+			     SYSTEM CALLS
+			     ============
+
+---- FROM USERSPACE TO THE KERNEL ----
+
+>> B0: When syscall_handler() is called, where is the system call number
+>> stored? Where are the arguments to the system call, if any, stored? 
+>> Give the backtrace of the stack during syscall_handler() (be sure
+>> to resolve addresses both in user space and in kernel space!) and
+>> give your answer in relation to this backtrace. Explain why the
+>> syscall number and arguments appear at this place in the stack. 
+   
+   When syscall_handler is called the system call number is stored 
+   at the location pointed by esp i.e top of a stack. The other arguments are stored 
+   above esp. 
+
+   #0  syscall_handler (f=0xc010cfb0) at ../../userprog/syscall.c:30
+   #1  0xc0021938 in intr_handler (frame=0xc010cfb0)
+       at ../../threads/interrupt.c:367
+   #2  0xc0021b3f in intr_entry () at ../../threads/intr-stubs.S:37
+   #3  0xc010cfb0 in ?? ()
+   #4  0x08049c82 in ?? () 
+   
+    (gdb) p *(int  *)(f->esp)
+     $24 = 9
+    (gdb) p *(int  *)(f->esp + 20)
+     $23 = 1
+    (gdb) p *(char **)(f->esp + 24)
+     $19 = 0xbfffff04 "echo "
+    (gdb) p *(int  *)(f->esp + 28)
+     $22 = 5   
+	 
+	 While implementing argument passing, to support variable no of arguments 
+	 we push them in the reverse order onto the stack and the system call handler
+	 pushes the system call number at the top of the stack so they appear
+	 in the particular order.
+	 
+	
+	 
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+===================process.h=========================================
+// Introduced to maintain the open files associated with a process
+struct open_file
+{
+	struct file *file;
+	int fd;					// File descriptor of a file
+	struct list_elem file_elem;  //List element to iterate over open file list
+};
+
+// Introduced to maintain a structure of a child process
+
+struct child{
+   int cid;
+   bool exit;
+   struct list_elem child_elem; 
+   int exit_status; 
+   int load_status;
+   bool wait;
+   };
+=================================thread.h===========================
+
+struct child* child;
+-Added to refer to the child of a thread. 
+
+struct list child_list;
+-Added to maintain the list of child elements
+ created by a thread
+
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+   When a file with particular name is opened, a file pointer associated
+   with the file is stored in open_file structure and file descriptor is assigned
+   for that pointer. And that fd is returned to user which maps fd to 
+   file pointer.
+   
+   
+   In our implementation the file descriptors are not unique
+   within the entire OS. The fds are unique only for a particular 
+   thread. For each thread we maintain a fd in thread structure 
+   for it to be unique.
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+   In our implementation read is implemented in the following way: 
+   1. First we validate the pointer to check whether the user is 
+      accessing a valid user memory (i.e not the kernel virtual 
+	  address space or unmapped virtual memory) 
+   2. Then we validate the size of the file, if it is 
+      zero we simply return zero. 
+   3. Then we check for a valid fd. (i.e if fd is 
+      fd<0 || fd > FDMAX = 32, fd == STDOUT) 
+	  we simply exit from the read operation. 
+   4. Then we check whether fd is pointing to STDIN 
+      if it is pointing to STDIN then we call inpugetc 
+	  and return the size  
+   5. Else if it is not a STDIN we read the file through 
+      file_sys_read and return the read bytes. 
+	  
+ In our implementation write is implemented in the following way: 
+     Steps 1 and 2 are same as read
+	 3. Then we check for a valid fd. (i.e if fd is 
+      fd<0 || fd > FDMAX = 32, fd == STDIN ) 
+	  we simply exit from the read operation. 
+	 4. Then we check whether fd is pointing to STDOUT 
+       if it is pointing to STDOUT then we call putbuf
+       to write on the console	   
+   5. Else if it is not a STDOUT we write the file through 
+      file_sys_write.
+
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+   
+   We used pagedir_get_page() function, two times in our code first while
+   validating esp pointer and second while validating arguments.
+   If we consider page size is of 2 bytes then number of times we need 
+   valid page is if data size is 4096 bytes is 2048 plus we need to validate 
+   esp that many times so max table lookup is (2048 + 2048 = 4096) times.
+   
+   If data size is 2 bytes then esp and page is validated only once and 
+   2 page lookup required in that case.
+   We can improve the page lookup by not validating esp and arguments 
+   to function. Instead we will allow to happen page fault and will
+   handle the page fault.
+   
+   
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+    In our implementation wait is executed in the following way: 
+	1. First we check for the child_id obtained in the method 
+	   in the child list by the function get_child
+	2. If it is not a direct child of the thread we will get a NULL 
+	   value and return process_fail message.
+	3. If the child is found we check whether the thread is 
+	   already waiting on the same child. If it does then return 
+	   Process_fail message.
+	4. Now,we make the child->wait= true for the parent. 
+	5. Then we keep looping unless the child exits through 
+	   the barrier function.
+	6. After this we mark the exit status of the child. 
+	7. At last we remove the child from the child list.
+
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+   First thing we did was checking validity of esp pointer and then 
+   we checked validity of arguments passed to the function.
+   To check validity of esp and arguments passed to the function,
+   first we use function is_user_vaddr() to check whether pointer lies
+   below Physical base and above code segment.
+   Then we used function pagedir_get_page() to map physical address
+   to kernel virtual address, if it didn't map then it will send NULL address
+   if we received null then we have exited the process.
+   When we detect the error, first thing before calling sys_exit() function 
+   is to free acquired lock and then inside process_exit() function call
+   we freed resources we allocated such as list of open files and list 
+   of child thread to it.
+
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+   In exec system call we keep looping until the exit status is marked
+   true. This is how our code ensures that it cannot return before
+   the new executable has completed loading.
+   Also, when a process loads successfully we mark a flag 
+   indicating load is successful. If the load fails then 
+   the load status is marked with the process fail message.
+   
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+   In our implementation we have implemented a structure of child 
+   which has a pointer to itself in the child list of parent. 
+   Now, if the child exits before the parent it will set its exit status
+   as true. And even if it is exits the parent can have access
+   to the pointer of child. So that when a parent checks for the child 
+   which has already exited it can check the child exit status.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+   To access user memory from the kernel, we have written a function 
+   validate_user_ptr which checks whether the virtual address is larger than the 
+   physical base address. If it is greater than the physical address we exit 
+   with an error. If the virtual address is in range then further we use 
+   the pagedir_get_page to check if the virtual address is mapped or not. 
+   If it is unmapped it will return a NULL value.
+   One of the advantages of this implementation is to prevent page fault from 
+   happening. In each system call, we check the virtual address provided by the
+   user, if the address is invalid, the process would be terminated rather 
+   than allowing it to execute for a while which in turn reduces the 
+   process resource wastage.
+   
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+    In our implementation, we have implemented a structure of open 
+	files which maintains a fd which facilitates one to one mapping
+	between an open file and fd.
+	
+	One disadvantage of this approach can be the fds that we get is 
+	not unique to the entire OS. It is only unique to a given thread.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+   We didn't change the identity mapping in our implementation.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
